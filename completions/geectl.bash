@@ -313,6 +313,9 @@ _geectl() {
             geectl__subcmd__config,help)
                 cmd="geectl__subcmd__config__subcmd__help"
                 ;;
+            geectl__subcmd__config,import-oscrc)
+                cmd="geectl__subcmd__config__subcmd__import__subcmd__oscrc"
+                ;;
             geectl__subcmd__config,init)
                 cmd="geectl__subcmd__config__subcmd__init"
                 ;;
@@ -321,6 +324,9 @@ _geectl() {
                 ;;
             geectl__subcmd__config__subcmd__help,help)
                 cmd="geectl__subcmd__config__subcmd__help__subcmd__help"
+                ;;
+            geectl__subcmd__config__subcmd__help,import-oscrc)
+                cmd="geectl__subcmd__config__subcmd__help__subcmd__import__subcmd__oscrc"
                 ;;
             geectl__subcmd__config__subcmd__help,init)
                 cmd="geectl__subcmd__config__subcmd__help__subcmd__init"
@@ -570,6 +576,9 @@ _geectl() {
                 ;;
             geectl__subcmd__help__subcmd__changelog,validate)
                 cmd="geectl__subcmd__help__subcmd__changelog__subcmd__validate"
+                ;;
+            geectl__subcmd__help__subcmd__config,import-oscrc)
+                cmd="geectl__subcmd__help__subcmd__config__subcmd__import__subcmd__oscrc"
                 ;;
             geectl__subcmd__help__subcmd__config,init)
                 cmd="geectl__subcmd__help__subcmd__config__subcmd__init"
@@ -3215,7 +3224,7 @@ _geectl() {
             return 0
             ;;
         geectl__subcmd__config)
-            opts="-h --format --debug --debug-body --live --help show init help"
+            opts="-h --format --debug --debug-body --live --help show init import-oscrc help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3233,7 +3242,7 @@ _geectl() {
             return 0
             ;;
         geectl__subcmd__config__subcmd__help)
-            opts="show init help"
+            opts="show init import-oscrc help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3247,6 +3256,20 @@ _geectl() {
             return 0
             ;;
         geectl__subcmd__config__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        geectl__subcmd__config__subcmd__help__subcmd__import__subcmd__oscrc)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -3281,6 +3304,36 @@ _geectl() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        geectl__subcmd__config__subcmd__import__subcmd__oscrc)
+            opts="-h --oscrc --apiurl --alias --force --format --debug --debug-body --live --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --oscrc)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --apiurl)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --alias)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json text" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -4307,8 +4360,22 @@ _geectl() {
             return 0
             ;;
         geectl__subcmd__help__subcmd__config)
-            opts="show init"
+            opts="show init import-oscrc"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        geectl__subcmd__help__subcmd__config__subcmd__import__subcmd__oscrc)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
