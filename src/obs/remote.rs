@@ -1821,6 +1821,7 @@ pub(crate) fn parse_owners(body: &str) -> Option<Vec<Owner>> {
                 persons.push(NamedRole {
                     name: xml_unescape(&name),
                     role: xml_unescape(&role),
+                    email: None,
                 });
             }
         }
@@ -1833,6 +1834,7 @@ pub(crate) fn parse_owners(body: &str) -> Option<Vec<Owner>> {
                 groups.push(NamedRole {
                     name: xml_unescape(&name),
                     role: xml_unescape(&role),
+                    email: None,
                 });
             }
         }
@@ -3666,12 +3668,36 @@ impl<'a> ObsClient<'a> {
         }
         let url = build_url(&self.base, &["search", "owner"], params);
         let body = self.http.get_with(&url, &self.credentials)?;
-        parse_owners(&body).ok_or_else(|| {
+        let mut owners = parse_owners(&body).ok_or_else(|| {
             GeectlError::new(
                 ErrorKind::ServerError,
                 format!("unexpected OBS owner search response for {label}"),
             )
-        })
+        })?;
+        // Persons carry their email: the search itself returns name
+        // and role only, so each distinct login costs one `whois`
+        // (`GET /person/<login>`), deduplicated across owner
+        // entries: a person named twice is looked up once. Groups
+        // are not persons and carry no email. A failed lookup fails
+        // the search: a login the server just returned should
+        // resolve, and a half-enriched result would lie about which
+        // persons have no email.
+        let mut emails: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for owner in &mut owners {
+            for person in &mut owner.persons {
+                let email = match emails.get(&person.name) {
+                    Some(email) => email.clone(),
+                    None => {
+                        let email = self.whois(&person.name)?.email;
+                        emails.insert(person.name.clone(), email.clone());
+                        email
+                    }
+                };
+                person.email = Some(email);
+            }
+        }
+        Ok(owners)
     }
 
     /// List the projects whose scmsync URL starts with `url_prefix`
@@ -3786,7 +3812,13 @@ impl<'a> ObsClient<'a> {
     /// /search/owner?project=...&package=...`). Requires credentials;
     /// without them the search fails loudly before any request. An
     /// unexpected response (not a collection) is an error, never an
-    /// empty list.
+    /// empty list. Each person carries the email from `whois()`: the
+    /// search returns name and role only, so the lookup costs one
+    /// `GET /person/<login>` per distinct login in the result (see
+    /// `owner_search`).
+    ///
+    /// Whether `/search/owner` itself returns emails for git-backed
+    /// packages settles only against the live API, not the tree.
     pub fn owners(&self, project: &str, package: &str) -> Result<Vec<Owner>, GeectlError> {
         for (label, value) in [("project", project), ("package", package)] {
             if !valid_obs_name(value) {
@@ -3804,7 +3836,8 @@ impl<'a> ObsClient<'a> {
 
     /// The owners of binary `binary` (`GET
     /// /search/owner?binary=...`). Requires credentials; an
-    /// unexpected response is an error, never an empty list.
+    /// unexpected response is an error, never an empty list. Persons
+    /// carry their email, as in [`ObsClient::owners`].
     pub fn owners_for_binary(&self, binary: &str) -> Result<Vec<Owner>, GeectlError> {
         if !valid_obs_name(binary) {
             return Err(GeectlError::new(
@@ -3829,7 +3862,8 @@ impl<'a> ObsClient<'a> {
     /// defaults
     /// apply — a package search returns every hit (the limit default
     /// of 1 covers binary searches only), so the result is every
-    /// owner the server reports.
+    /// owner the server reports. Persons carry their email, as in
+    /// [`ObsClient::owners`].
     pub fn owners_for_package(&self, package: &str) -> Result<Vec<Owner>, GeectlError> {
         if !valid_obs_name(package) {
             return Err(GeectlError::new(
@@ -3853,7 +3887,8 @@ impl<'a> ObsClient<'a> {
 
     /// The maintainers of package `package` in project `project`:
     /// the owners filtered to role `maintainer`, as `(name, role)`
-    /// pairs (persons and groups flattened).
+    /// pairs (persons and groups flattened); persons carry their
+    /// email, as in [`ObsClient::owners`].
     pub fn maintainers(&self, project: &str, package: &str) -> Result<Vec<NamedRole>, GeectlError> {
         let owners = self.owners(project, package)?;
         let mut maintainers = Vec::new();
@@ -11047,6 +11082,7 @@ mod tests {
             vec![NamedRole {
                 name: "Admin".to_string(),
                 role: "maintainer".to_string(),
+                email: None,
             }]
         );
         assert_eq!(
@@ -11054,6 +11090,7 @@ mod tests {
             vec![NamedRole {
                 name: "factory-maintainers".to_string(),
                 role: "maintainer".to_string(),
+                email: None,
             }]
         );
         assert_eq!(
@@ -11363,10 +11400,12 @@ mod tests {
                 NamedRole {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
+                    email: None,
                 },
                 NamedRole {
                     name: "scarabeus_iv".to_string(),
                     role: "bugowner".to_string(),
+                    email: None,
                 },
             ]
         );
@@ -11375,6 +11414,7 @@ mod tests {
             vec![NamedRole {
                 name: "factory-maintainers".to_string(),
                 role: "maintainer".to_string(),
+                email: None,
             }]
         );
     }
@@ -12224,6 +12264,11 @@ mod tests {
         <globalrole>Admin</globalrole>\
         </person>";
 
+    const PERSON_SCARABEUS_FIXTURE: &str = "<person>\
+        <login>scarabeus_iv</login><email>scarabeus@example.com</email>\
+        <state>confirmed</state>\
+        </person>";
+
     #[test]
     fn owner_search_parses_owners() {
         let owners = parse_owners(OWNER_SEARCH_FIXTURE).unwrap();
@@ -12238,15 +12283,18 @@ mod tests {
                         NamedRole {
                             name: "Admin".to_string(),
                             role: "maintainer".to_string(),
+                            email: None,
                         },
                         NamedRole {
                             name: "scarabeus_iv".to_string(),
                             role: "bugowner".to_string(),
+                            email: None,
                         },
                     ],
                     groups: vec![NamedRole {
                         name: "factory-maintainers".to_string(),
                         role: "maintainer".to_string(),
+                        email: None,
                     }],
                 },
                 Owner {
@@ -12256,6 +12304,7 @@ mod tests {
                     persons: vec![NamedRole {
                         name: "Admin".to_string(),
                         role: "maintainer".to_string(),
+                        email: None,
                     }],
                     groups: vec![],
                 },
@@ -12348,30 +12397,117 @@ mod tests {
 
     #[test]
     fn owners_searches_by_project_and_package_authed() {
-        let http = FakeHttp::new().with_get(
-            "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
-            OWNER_SEARCH_FIXTURE,
-        );
+        let http = FakeHttp::new()
+            .with_get(
+                "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
+                OWNER_SEARCH_FIXTURE,
+            )
+            .with_get("https://api.opensuse.org/person/Admin", PERSON_FIXTURE)
+            .with_get(
+                "https://api.opensuse.org/person/scarabeus_iv",
+                PERSON_SCARABEUS_FIXTURE,
+            );
         let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
         let owners = client.owners("openSUSE:Factory", "foo").unwrap();
         assert_eq!(owners.len(), 2);
         assert_eq!(owners[0].package.as_deref(), Some("foo"));
         assert_eq!(
             http.get_calls(),
-            vec![(
-                "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo"
-                    .to_string(),
-                true
-            )]
+            vec![
+                (
+                    "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo"
+                        .to_string(),
+                    true
+                ),
+                ("https://api.opensuse.org/person/Admin".to_string(), true),
+                (
+                    "https://api.opensuse.org/person/scarabeus_iv".to_string(),
+                    true
+                ),
+            ]
         );
     }
 
     #[test]
-    fn owners_for_binary_searches_by_binary() {
+    fn owners_enriches_persons_with_emails_via_whois() {
+        let http = FakeHttp::new()
+            .with_get(
+                "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
+                OWNER_SEARCH_FIXTURE,
+            )
+            .with_get("https://api.opensuse.org/person/Admin", PERSON_FIXTURE)
+            .with_get(
+                "https://api.opensuse.org/person/scarabeus_iv",
+                PERSON_SCARABEUS_FIXTURE,
+            );
+        let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
+        let owners = client.owners("openSUSE:Factory", "foo").unwrap();
+        assert_eq!(owners.len(), 2);
+        assert_eq!(
+            owners[0].persons,
+            vec![
+                NamedRole {
+                    name: "Admin".to_string(),
+                    role: "maintainer".to_string(),
+                    email: Some("admin@example.com".to_string()),
+                },
+                NamedRole {
+                    name: "scarabeus_iv".to_string(),
+                    role: "bugowner".to_string(),
+                    email: Some("scarabeus@example.com".to_string()),
+                },
+            ]
+        );
+        // Admin appears in both owner entries: one whois call, not two.
+        assert_eq!(
+            owners[1].persons,
+            vec![NamedRole {
+                name: "Admin".to_string(),
+                role: "maintainer".to_string(),
+                email: Some("admin@example.com".to_string()),
+            }]
+        );
+        // Groups are not persons: no email.
+        assert_eq!(owners[0].groups[0].email, None);
+        assert_eq!(
+            http.get_calls(),
+            vec![
+                (
+                    "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo"
+                        .to_string(),
+                    true
+                ),
+                ("https://api.opensuse.org/person/Admin".to_string(), true),
+                (
+                    "https://api.opensuse.org/person/scarabeus_iv".to_string(),
+                    true
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn owners_whois_failure_is_an_error() {
         let http = FakeHttp::new().with_get(
-            "https://api.opensuse.org/search/owner?binary=python3.11",
+            "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
             OWNER_SEARCH_FIXTURE,
         );
+        let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
+        assert!(client.owners("openSUSE:Factory", "foo").is_err());
+    }
+
+    #[test]
+    fn owners_for_binary_searches_by_binary() {
+        let http = FakeHttp::new()
+            .with_get(
+                "https://api.opensuse.org/search/owner?binary=python3.11",
+                OWNER_SEARCH_FIXTURE,
+            )
+            .with_get("https://api.opensuse.org/person/Admin", PERSON_FIXTURE)
+            .with_get(
+                "https://api.opensuse.org/person/scarabeus_iv",
+                PERSON_SCARABEUS_FIXTURE,
+            );
         let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
         let owners = client.owners_for_binary("python3.11").unwrap();
         assert_eq!(owners.len(), 2);
@@ -12379,20 +12515,33 @@ mod tests {
 
     #[test]
     fn owners_for_package_searches_by_package() {
-        let http = FakeHttp::new().with_get(
-            "https://api.opensuse.org/search/owner?package=foo",
-            OWNER_SEARCH_FIXTURE,
-        );
+        let http = FakeHttp::new()
+            .with_get(
+                "https://api.opensuse.org/search/owner?package=foo",
+                OWNER_SEARCH_FIXTURE,
+            )
+            .with_get("https://api.opensuse.org/person/Admin", PERSON_FIXTURE)
+            .with_get(
+                "https://api.opensuse.org/person/scarabeus_iv",
+                PERSON_SCARABEUS_FIXTURE,
+            );
         let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
         let owners = client.owners_for_package("foo").unwrap();
         assert_eq!(owners.len(), 2);
         assert_eq!(owners[0].package.as_deref(), Some("foo"));
         assert_eq!(
             http.get_calls(),
-            vec![(
-                "https://api.opensuse.org/search/owner?package=foo".to_string(),
-                true
-            )]
+            vec![
+                (
+                    "https://api.opensuse.org/search/owner?package=foo".to_string(),
+                    true
+                ),
+                ("https://api.opensuse.org/person/Admin".to_string(), true),
+                (
+                    "https://api.opensuse.org/person/scarabeus_iv".to_string(),
+                    true
+                ),
+            ]
         );
     }
 
@@ -12401,10 +12550,12 @@ mod tests {
         // The real Container response carries rootproject="": an
         // empty root project is still a present attribute, so the
         // owner parses with an empty root project.
-        let http = FakeHttp::new().with_get(
-            "https://api.opensuse.org/search/owner?package=foo",
-            "<collection matches=\"1\"><owner rootproject=\"\" project=\"openSUSE:Factory\" package=\"foo\"><person name=\"Admin\" role=\"maintainer\"/></owner></collection>",
-        );
+        let http = FakeHttp::new()
+            .with_get(
+                "https://api.opensuse.org/search/owner?package=foo",
+                "<collection matches=\"1\"><owner rootproject=\"\" project=\"openSUSE:Factory\" package=\"foo\"><person name=\"Admin\" role=\"maintainer\"/></owner></collection>",
+            )
+            .with_get("https://api.opensuse.org/person/Admin", PERSON_FIXTURE);
         let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
         let owners = client.owners_for_package("foo").unwrap();
         assert_eq!(owners.len(), 1);
@@ -12463,10 +12614,16 @@ mod tests {
 
     #[test]
     fn maintainers_filters_to_the_maintainer_role() {
-        let http = FakeHttp::new().with_get(
-            "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
-            OWNER_SEARCH_FIXTURE,
-        );
+        let http = FakeHttp::new()
+            .with_get(
+                "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
+                OWNER_SEARCH_FIXTURE,
+            )
+            .with_get("https://api.opensuse.org/person/Admin", PERSON_FIXTURE)
+            .with_get(
+                "https://api.opensuse.org/person/scarabeus_iv",
+                PERSON_SCARABEUS_FIXTURE,
+            );
         let client = ObsClient::with_credentials(&http, basic_credentials()).unwrap();
         assert_eq!(
             client.maintainers("openSUSE:Factory", "foo").unwrap(),
@@ -12474,14 +12631,17 @@ mod tests {
                 NamedRole {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
+                    email: Some("admin@example.com".to_string()),
                 },
                 NamedRole {
                     name: "factory-maintainers".to_string(),
                     role: "maintainer".to_string(),
+                    email: None,
                 },
                 NamedRole {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
+                    email: Some("admin@example.com".to_string()),
                 },
             ]
         );
