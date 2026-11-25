@@ -2305,7 +2305,7 @@ mod tests {
       <sourceupdate>cleanup</sourceupdate>
       <updatelink>1</updatelink>
     </options>
-    <acceptinfo rev="5" srcmd5="deadbeef" />
+    <acceptinfo rev="5" srcmd5="deadbeefdeadbeefdeadbeefdeadbeef" />
   </action>
   <action type="add_role">
     <target project="home:foo" />
