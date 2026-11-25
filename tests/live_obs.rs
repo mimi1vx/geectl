@@ -6996,6 +6996,7 @@ fn live_search_projects_by_person_finds_the_maintainer() {
         name: "Admin".to_string(),
         role: "maintainer".to_string(),
         email: None,
+        realname: None,
     }];
     client
         .set_project_meta(&project, &meta, &DryRun::new(false))
@@ -7037,6 +7038,7 @@ fn live_search_packages_by_person_finds_the_maintainer() {
         name: "Admin".to_string(),
         role: "maintainer".to_string(),
         email: None,
+        realname: None,
     }];
     client
         .set_package_meta(&project, &package, &meta, &DryRun::new(false))
@@ -7936,6 +7938,7 @@ fn live_server_accepts_project_meta_without_maintainers() {
             name: user,
             role: "maintainer".to_string(),
             email: None,
+            realname: None,
         });
         client
             .set_project_meta(&project, &meta, &DryRun::new(false))

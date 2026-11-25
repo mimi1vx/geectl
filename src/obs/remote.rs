@@ -1908,6 +1908,7 @@ pub(crate) fn parse_owners(body: &str) -> Option<Vec<Owner>> {
                     name: strip_terminal_controls(&xml_unescape(&name)),
                     role: xml_unescape(&role),
                     email: None,
+                    realname: None,
                 });
             }
         }
@@ -1922,6 +1923,7 @@ pub(crate) fn parse_owners(body: &str) -> Option<Vec<Owner>> {
                     name: strip_terminal_controls(&xml_unescape(&name)),
                     role: xml_unescape(&role),
                     email: None,
+                    realname: None,
                 });
             }
         }
@@ -3765,27 +3767,29 @@ impl<'a> ObsClient<'a> {
                 format!("unexpected OBS owner search response for {label}"),
             )
         })?;
-        // Persons carry their email: the search itself returns name
-        // and role only, so each distinct login costs one `whois`
-        // (`GET /person/<login>`), deduplicated across owner
-        // entries: a person named twice is looked up once. Groups
-        // are not persons and carry no email. A failed lookup fails
-        // the search: a login the server just returned should
-        // resolve, and a half-enriched result would lie about which
-        // persons have no email.
-        let mut emails: std::collections::HashMap<String, String> =
+        // Persons carry their email and realname: the search
+        // itself returns name and role only, so each distinct login
+        // costs one `whois` (`GET /person/<login>`), deduplicated
+        // across owner entries: a person named twice is looked up
+        // once. Groups are not persons and carry neither. A failed
+        // lookup fails the search: a login the server just returned
+        // should resolve, and a half-enriched result would lie about
+        // which persons have no email.
+        let mut enriched: std::collections::HashMap<String, (String, Option<String>)> =
             std::collections::HashMap::new();
         for owner in &mut owners {
             for person in &mut owner.persons {
-                let email = match emails.get(&person.name) {
-                    Some(email) => email.clone(),
+                let (email, realname) = match enriched.get(&person.name) {
+                    Some((email, realname)) => (email.clone(), realname.clone()),
                     None => {
-                        let email = self.whois(&person.name)?.email;
-                        emails.insert(person.name.clone(), email.clone());
-                        email
+                        let whois = self.whois(&person.name)?;
+                        let enriched_person = (whois.email, whois.realname);
+                        enriched.insert(person.name.clone(), enriched_person.clone());
+                        enriched_person
                     }
                 };
                 person.email = Some(email);
+                person.realname = realname;
             }
         }
         Ok(owners)
@@ -3903,10 +3907,10 @@ impl<'a> ObsClient<'a> {
     /// /search/owner?project=...&package=...`). Requires credentials;
     /// without them the search fails loudly before any request. An
     /// unexpected response (not a collection) is an error, never an
-    /// empty list. Each person carries the email from `whois()`: the
-    /// search returns name and role only, so the lookup costs one
-    /// `GET /person/<login>` per distinct login in the result (see
-    /// `owner_search`).
+    /// empty list. Each person carries the email and realname from
+    /// `whois()`: the search returns name and role only, so the
+    /// lookup costs one `GET /person/<login>` per distinct login in
+    /// the result (see `owner_search`).
     ///
     /// Whether `/search/owner` itself returns emails for git-backed
     /// packages settles only against the live API, not the tree.
@@ -3928,7 +3932,7 @@ impl<'a> ObsClient<'a> {
     /// The owners of binary `binary` (`GET
     /// /search/owner?binary=...`). Requires credentials; an
     /// unexpected response is an error, never an empty list. Persons
-    /// carry their email, as in [`ObsClient::owners`].
+    /// carry their email and realname, as in [`ObsClient::owners`].
     pub fn owners_for_binary(&self, binary: &str) -> Result<Vec<Owner>, GeectlError> {
         if !valid_obs_name(binary) {
             return Err(GeectlError::new(
@@ -3953,7 +3957,7 @@ impl<'a> ObsClient<'a> {
     /// defaults
     /// apply — a package search returns every hit (the limit default
     /// of 1 covers binary searches only), so the result is every
-    /// owner the server reports. Persons carry their email, as in
+    /// owner the server reports. Persons carry their email and realname, as in
     /// [`ObsClient::owners`].
     pub fn owners_for_package(&self, package: &str) -> Result<Vec<Owner>, GeectlError> {
         if !valid_obs_name(package) {
@@ -3979,7 +3983,7 @@ impl<'a> ObsClient<'a> {
     /// The maintainers of package `package` in project `project`:
     /// the owners filtered to role `maintainer`, as `(name, role)`
     /// pairs (persons and groups flattened); persons carry their
-    /// email, as in [`ObsClient::owners`].
+    /// email and realname, as in [`ObsClient::owners`].
     pub fn maintainers(&self, project: &str, package: &str) -> Result<Vec<NamedRole>, GeectlError> {
         let owners = self.owners(project, package)?;
         let mut maintainers = Vec::new();
@@ -11680,6 +11684,7 @@ mod tests {
                 name: "Admin".to_string(),
                 role: "maintainer".to_string(),
                 email: None,
+                realname: None,
             }]
         );
         assert_eq!(
@@ -11688,6 +11693,7 @@ mod tests {
                 name: "factory-maintainers".to_string(),
                 role: "maintainer".to_string(),
                 email: None,
+                realname: None,
             }]
         );
         assert_eq!(
@@ -11998,11 +12004,13 @@ mod tests {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
                     email: None,
+                    realname: None,
                 },
                 NamedRole {
                     name: "scarabeus_iv".to_string(),
                     role: "bugowner".to_string(),
                     email: None,
+                    realname: None,
                 },
             ]
         );
@@ -12012,6 +12020,7 @@ mod tests {
                 name: "factory-maintainers".to_string(),
                 role: "maintainer".to_string(),
                 email: None,
+                realname: None,
             }]
         );
     }
@@ -12900,17 +12909,20 @@ mod tests {
                             name: "Admin".to_string(),
                             role: "maintainer".to_string(),
                             email: None,
+                            realname: None,
                         },
                         NamedRole {
                             name: "scarabeus_iv".to_string(),
                             role: "bugowner".to_string(),
                             email: None,
+                            realname: None,
                         },
                     ],
                     groups: vec![NamedRole {
                         name: "factory-maintainers".to_string(),
                         role: "maintainer".to_string(),
                         email: None,
+                        realname: None,
                     }],
                 },
                 Owner {
@@ -12921,6 +12933,7 @@ mod tests {
                         name: "Admin".to_string(),
                         role: "maintainer".to_string(),
                         email: None,
+                        realname: None,
                     }],
                     groups: vec![],
                 },
@@ -13070,7 +13083,7 @@ mod tests {
     }
 
     #[test]
-    fn owners_enriches_persons_with_emails_via_whois() {
+    fn owners_enriches_persons_with_email_and_realname_via_whois() {
         let http = FakeHttp::new()
             .with_get(
                 "https://api.opensuse.org/search/owner?project=openSUSE%3AFactory&package=foo",
@@ -13091,11 +13104,13 @@ mod tests {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
                     email: Some("admin@example.com".to_string()),
+                    realname: Some("Admin User".to_string()),
                 },
                 NamedRole {
                     name: "scarabeus_iv".to_string(),
                     role: "bugowner".to_string(),
                     email: Some("scarabeus@example.com".to_string()),
+                    realname: None,
                 },
             ]
         );
@@ -13106,10 +13121,12 @@ mod tests {
                 name: "Admin".to_string(),
                 role: "maintainer".to_string(),
                 email: Some("admin@example.com".to_string()),
+                realname: Some("Admin User".to_string()),
             }]
         );
-        // Groups are not persons: no email.
+        // Groups are not persons: no email or realname.
         assert_eq!(owners[0].groups[0].email, None);
+        assert_eq!(owners[0].groups[0].realname, None);
         assert_eq!(
             http.get_calls(),
             vec![
@@ -13273,16 +13290,19 @@ mod tests {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
                     email: Some("admin@example.com".to_string()),
+                    realname: Some("Admin User".to_string()),
                 },
                 NamedRole {
                     name: "factory-maintainers".to_string(),
                     role: "maintainer".to_string(),
                     email: None,
+                    realname: None,
                 },
                 NamedRole {
                     name: "Admin".to_string(),
                     role: "maintainer".to_string(),
                     email: Some("admin@example.com".to_string()),
+                    realname: Some("Admin User".to_string()),
                 },
             ]
         );
