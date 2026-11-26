@@ -47,7 +47,7 @@
 
 use crate::auth::{Credentials, EnvGiteaAuth, EnvObsAuth};
 use crate::config::{self, DEFAULT_GITEA_URL};
-use crate::debug::{strip_terminal_controls, Debug};
+use crate::debug::{strip_terminal_controls_marked, Debug};
 use crate::error::{ErrorKind, GeectlError};
 use crate::gitea::{
     parse_gitea_repo, parse_scmsync_url, validate_gitea_base, GiteaClient, GiteaMergeMethod,
@@ -2713,7 +2713,10 @@ fn comments_text(reference: &PullRequestRef, comments: &[ReviewComment]) -> Stri
         if !comment.created.is_empty() {
             line.push_str(&format!(" at {}", comment.created));
         }
-        line.push_str(&format!(": {}", strip_terminal_controls(&comment.body)));
+        line.push_str(&format!(
+            ": {}",
+            strip_terminal_controls_marked(&comment.body)
+        ));
         if let Some(parent) = comment.parent_id {
             line.push_str(&format!(" (reply to {parent})"));
         }
@@ -2867,14 +2870,17 @@ fn payload_json<T: Serialize>(value: &T) -> Result<Value, GeectlError> {
 fn render_pull_request_text(pr: &PullRequest) -> String {
     let mut lines = vec![format!("reference: {}", pr.reference)];
     if !pr.title.is_empty() {
-        lines.push(format!("title: {}", strip_terminal_controls(&pr.title)));
+        lines.push(format!(
+            "title: {}",
+            strip_terminal_controls_marked(&pr.title)
+        ));
     }
     lines.push(format!("author: {}", pr.author));
     lines.push(format!("state: {}", pr.status.as_str()));
     if !pr.description.is_empty() {
         lines.push(format!(
             "description: {}",
-            strip_terminal_controls(&pr.description)
+            strip_terminal_controls_marked(&pr.description)
         ));
     }
     if pr.draft {
@@ -2909,7 +2915,7 @@ fn render_pull_request_text(pr: &PullRequest) -> String {
             lines.push(format!(
                 "review {} comment: {}",
                 index + 1,
-                strip_terminal_controls(&review.comment)
+                strip_terminal_controls_marked(&review.comment)
             ));
         }
         if let Some(when) = &review.when {
@@ -2924,7 +2930,7 @@ fn render_pull_request_text(pr: &PullRequest) -> String {
             "labels: {}",
             pr.labels
                 .iter()
-                .map(|label| strip_terminal_controls(label))
+                .map(|label| strip_terminal_controls_marked(label))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -3210,10 +3216,11 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_text_strips_terminal_controls_from_free_text_fields() {
+    fn pull_request_text_marks_stripped_terminal_controls_in_free_text_fields() {
         // Free text from the server reaches the terminal through the
         // PR render: escape sequences, carriage returns, bells, and
-        // bidirectional marks are stripped, while newlines survive.
+        // bidirectional marks are stripped, leaving a marker where
+        // characters were removed, while newlines survive.
         let mut pr = fixture_gitea_pull_request();
         pr.title = "ti\u{1b}[2Jtle".to_string();
         pr.description = "de\u{7}sc\nription".to_string();
@@ -3224,10 +3231,10 @@ mod tests {
         assert!(!text.contains('\u{7}'), "text: {text}");
         assert!(!text.contains('\r'), "text: {text}");
         assert!(!text.contains('\u{202e}'), "text: {text}");
-        assert!(text.contains("title: ti[2Jtle"), "text: {text}");
-        assert!(text.contains("description: desc\nription"), "text: {text}");
-        assert!(text.contains("review 1 comment: review"), "text: {text}");
-        assert!(text.contains("labels: label"), "text: {text}");
+        assert!(text.contains("title: ti…[2Jtle"), "text: {text}");
+        assert!(text.contains("description: de…sc\nription"), "text: {text}");
+        assert!(text.contains("review 1 comment: re…view"), "text: {text}");
+        assert!(text.contains("labels: la…bel"), "text: {text}");
     }
 
     #[test]
@@ -3579,10 +3586,11 @@ mod tests {
     }
 
     #[test]
-    fn comments_text_strips_terminal_controls_from_bodies() {
+    fn comments_text_marks_stripped_terminal_controls_in_bodies() {
         // Comment bodies are free text from another user: escape
         // sequences, bells, and bidirectional marks are stripped at
-        // the render.
+        // the render, leaving a marker where characters were
+        // removed.
         let reference = gitea_reference();
         let mut comment = fixture_comment();
         comment.body = "fi\u{1b}[2Jx\u{7}ed\nline\u{202e}two".to_string();
@@ -3591,7 +3599,7 @@ mod tests {
         assert!(!text.contains('\u{7}'), "text: {text}");
         assert!(!text.contains('\u{202e}'), "text: {text}");
         assert!(
-            text.contains("comment 7 by plusky at 2026-11-22T19:52:58Z: fi[2Jxed\nlinetwo"),
+            text.contains("comment 7 by plusky at 2026-11-22T19:52:58Z: fi…[2Jx…ed\nline…two"),
             "text: {text}"
         );
     }
