@@ -10327,7 +10327,7 @@ fn changelog_fixture(dir: &TempDir, changes_entry: &str, with_news: bool) -> Pat
     fs::write(
         pkg.join("foo.changes"),
         format!(
-            "{sep}\nWed May 27 16:31:48 UTC 2026 - Jane Packager <jane@example.com>\n\n{changes_entry}\n\n{sep}\nTue May 26 10:00:00 UTC 2026 - Jane Packager <jane@example.com>\n\n- Initial package\n\n"
+            "{sep}\nWed May 27 16:31:48 UTC 2026 - Jane Packager <jane@example.com>\n\n{changes_entry}\n\n{sep}\nTue May 26 10:00:00 UTC 2026 - Jane Packager <jane@example.com>\n\n- Initial package\n"
         ),
     )
     .unwrap();
@@ -10802,7 +10802,7 @@ fn changelog_validate_entries_flag_lints_older_entries() {
     fs::write(
         pkg.join("foo.changes"),
         format!(
-            "{sep}\nWed May 27 16:31:48 UTC 2026 - Jane Packager <jane@example.com>\n\n- Update to 2.0\n  * Fix a crash\n\n{sep}\nTue May 26 10:00:00 UTC 2026 - Jane Packager <jane@example.com>\n\n* Bad top star\n\n"
+            "{sep}\nWed May 27 16:31:48 UTC 2026 - Jane Packager <jane@example.com>\n\n- Update to 2.0\n  * Fix a crash\n\n{sep}\nTue May 26 10:00:00 UTC 2026 - Jane Packager <jane@example.com>\n\n* Bad top star\n"
         ),
     )
     .unwrap();
