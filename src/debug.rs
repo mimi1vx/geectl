@@ -509,6 +509,10 @@ pub fn redact_body(body: &str) -> String {
                         continue;
                     }
                 }
+                // No later start inside an unredacted name can redact: copy it whole.
+                out.push_str(name);
+                i = after_name;
+                continue;
             }
         }
         let len = body[i..].chars().next().unwrap().len_utf8();
@@ -803,6 +807,17 @@ Host: api.opensuse.org";
     fn redact_body_leaves_author_names_alone() {
         let body = "<author>Tom Chvatal</author>";
         assert_eq!(redact_body(body), body);
+    }
+
+    #[test]
+    fn redact_body_scans_a_long_word_in_linear_time() {
+        // Rescanning a word from each of its bytes made this take hours.
+        let word = "a".repeat(1_000_000);
+        assert_eq!(redact_body(&word), word);
+        assert_eq!(
+            redact_body(&format!("{word} token=secret")),
+            format!("{word} token=[redacted]")
+        );
     }
 
     #[test]
