@@ -23,7 +23,7 @@ pub struct StagedRequest {
     pub state: String,
     /// The first target package, when the request names one.
     pub package: Option<String>,
-    /// The request this one supersedes, when it supersedes one.
+    /// The request this one was superseded by, when it was superseded.
     pub superseded_by: Option<u64>,
 }
 
