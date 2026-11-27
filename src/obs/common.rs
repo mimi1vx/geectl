@@ -23,11 +23,15 @@ pub const OBS_API_BASE: &str = "https://api.opensuse.org";
 pub const FACTORY_PROJECT: &str = "openSUSE:Factory";
 
 /// True when `name` is a valid OBS package or project name
-/// (`[A-Za-z0-9_.+-:]`). Anything else is rejected rather than quoted
-/// into a URL or an XPath literal, where a `/`, `?`, or quote would
-/// rewrite the request.
+/// (`[A-Za-z0-9_.+-:]`, and not `.` or `..`). Anything else is
+/// rejected rather than quoted into a URL or an XPath literal, where
+/// a `/`, `?`, or quote would rewrite the request — and so would a
+/// dot-segment, which a front end normalizes away even when
+/// percent-encoded.
 pub fn valid_obs_name(name: &str) -> bool {
     !name.is_empty()
+        && name != "."
+        && name != ".."
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | ':'))
@@ -1139,6 +1143,12 @@ mod tests {
         assert!(!valid_obs_name("foo/bar"));
         assert!(!valid_obs_name("foo?x=1"));
         assert!(!valid_obs_name("foo' or '1'='1"));
+        // Dot-segments: a front end normalizing `/source/prj/.` to
+        // `/source/prj/` would aim a package operation at the project.
+        assert!(!valid_obs_name("."));
+        assert!(!valid_obs_name(".."));
+        assert!(valid_obs_name("..."));
+        assert!(valid_obs_name("15.6"));
     }
 
     #[test]
