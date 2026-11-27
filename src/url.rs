@@ -108,8 +108,9 @@ impl UrlBuilder {
     /// Build the URL string.
     pub fn build(self) -> String {
         let mut url = self.base;
-        for segment in self.segments {
-            if !url.ends_with('/') {
+        for (i, segment) in self.segments.into_iter().enumerate() {
+            // Reuse only the base's trailing slash, so an empty segment stays one.
+            if i > 0 || !url.ends_with('/') {
                 url.push('/');
             }
             url.push_str(&segment);
@@ -176,6 +177,23 @@ mod tests {
         // No strip/lstrip on segments: a leading or trailing `/` in a
         // segment is encoded, not silently removed.
         assert_eq!(encode_path_segment("/foo/"), "%2Ffoo%2F");
+    }
+
+    #[test]
+    fn empty_segments_are_kept() {
+        // The same URL `build_url` builds: an empty segment is an empty path element.
+        let url = UrlBuilder::new("https://example.com")
+            .unwrap()
+            .segment("a")
+            .segment("")
+            .segment("b")
+            .build();
+        assert_eq!(url, "https://example.com/a//b");
+        let url = UrlBuilder::new("https://example.com/")
+            .unwrap()
+            .segment("a")
+            .build();
+        assert_eq!(url, "https://example.com/a");
     }
 
     #[test]
