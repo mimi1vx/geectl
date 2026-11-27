@@ -1792,42 +1792,50 @@ fn url_authority_host(authority: &str) -> &str {
     authority.split(':').next().unwrap_or("")
 }
 
-/// True when a mirror host is public: not empty, not `localhost`,
-/// and not a literal loopback, link-local, private, or unspecified
-/// IP. An IPv4-mapped IPv6 address is classified by the address it
-/// maps to: `::ffff:10.0.0.1` is private. DNS names are taken at
-/// face value: only literal IP hosts are classified, a name that
+/// True when a mirror host is public: not empty, not `localhost` or
+/// a `.localhost` name (either with a trailing dot), and not a
+/// literal loopback, link-local, private, or unspecified IP. An
+/// IPv4-mapped IPv6 address is classified by the address it maps
+/// to: `::ffff:10.0.0.1` is private. A numeric host the strict IP
+/// parser rejects is refused, because the system resolver still
+/// reads legacy forms (`127.1`, `2130706433`, `0x7f.0.0.1`) as
+/// addresses. DNS names are taken at face value: a name that
 /// resolves to a private address is not caught here.
 fn mirror_host_is_public(host: &str) -> bool {
-    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+    let host = host.strip_suffix('.').unwrap_or(host);
+    if host.is_empty()
+        || host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+    {
         return false;
     }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        // An IPv4-mapped address answers as the address it maps
-        // to; the v6 arms below would otherwise miss it.
-        let ip = match ip {
-            std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-                Some(v4) => std::net::IpAddr::V4(v4),
-                None => std::net::IpAddr::V6(v6),
-            },
-            v4 => v4,
-        };
-        let non_public = match ip {
-            std::net::IpAddr::V4(v4) => {
-                v4.is_loopback() || v4.is_link_local() || v4.is_private() || v4.is_unspecified()
-            }
-            std::net::IpAddr::V6(v6) => {
-                v6.is_loopback()
-                    || v6.is_unicast_link_local()
-                    || v6.is_unique_local()
-                    || v6.is_unspecified()
-            }
-        };
-        if non_public {
-            return false;
+    let Ok(ip) = host.parse::<std::net::IpAddr>() else {
+        // Address spellings: no DNS top-level label starts with a digit,
+        // and a `:` only survives in an unparsed bracketed IPv6 host.
+        let last_label = host.rsplit('.').next().unwrap_or(host);
+        return !host.contains(':') && !last_label.starts_with(|c: char| c.is_ascii_digit());
+    };
+    // An IPv4-mapped address answers as the address it maps
+    // to; the v6 arms below would otherwise miss it.
+    let ip = match ip {
+        std::net::IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => std::net::IpAddr::V4(v4),
+            None => std::net::IpAddr::V6(v6),
+        },
+        v4 => v4,
+    };
+    let non_public = match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_link_local() || v4.is_private() || v4.is_unspecified()
         }
-    }
-    true
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unicast_link_local()
+                || v6.is_unique_local()
+                || v6.is_unspecified()
+        }
+    };
+    !non_public
 }
 
 /// True when a URL is a usable published-repo mirror base: `https`
@@ -3771,6 +3779,16 @@ mod tests {
         assert!(!valid_mirror_url("https://[::ffff:192.168.1.1]/x"));
         assert!(!valid_mirror_url("https://[::ffff:172.16.0.1]/x"));
         assert!(valid_mirror_url("https://[::ffff:8.8.8.8]/x"));
+        // Spellings the system resolver maps to loopback although
+        // the strict IP parser rejects them.
+        assert!(!valid_mirror_url("https://127.1/x"));
+        assert!(!valid_mirror_url("https://2130706433/x"));
+        assert!(!valid_mirror_url("https://0x7f.0.0.1/x"));
+        assert!(!valid_mirror_url("https://127.0.0.1./x"));
+        assert!(!valid_mirror_url("https://localhost./x"));
+        assert!(!valid_mirror_url("https://mirror.localhost/x"));
+        assert!(valid_mirror_url("https://8.8.8.8/x"));
+        assert!(valid_mirror_url("https://mirror.example.com./x"));
         assert!(!valid_mirror_url(""));
         assert!(!valid_mirror_url("mirror.example.com/x"));
         assert!(!valid_mirror_url("https:///x"));
@@ -3858,6 +3876,13 @@ mod tests {
             resolve_mirror_redirect(
                 "https://mirror.example.com/a/b.rpm",
                 "http://cdn.example.com/a/b.rpm"
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_mirror_redirect(
+                "https://mirror.example.com/a/b.rpm",
+                "https://127.1/a/b.rpm"
             ),
             None
         );
