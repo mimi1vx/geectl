@@ -127,9 +127,10 @@ pub fn read_oscrc(path: &Path) -> Result<String, GeectlError> {
 }
 
 /// Parse oscrc text (INI: `[section]` headers, `key = value` lines,
-/// `#`/`;` comments, indented continuation lines). Returns the
-/// instance sections in first-seen order, merged by apiurl: the
-/// `[general]` section contributes its `apiurl` key, any other
+/// `#`/`;` comments, indented or not, and indented continuation
+/// lines). Returns the instance sections in first-seen order,
+/// merged by apiurl: the `[general]` section contributes its
+/// `apiurl` key, any other
 /// section named by an `http(s)` URL contributes itself, and any
 /// other section is ignored (it names no instance). A section's
 /// username is its `user` key, when present and non-empty; the
@@ -149,6 +150,10 @@ pub fn parse_oscrc(text: &str, path: &Path) -> Result<Vec<OscrcSection>, GeectlE
         let line_no = index + 1;
         let line = raw_line.trim_end();
         if line.starts_with([' ', '\t']) {
+            // As in configparser: a comment, not continuation text, and the value goes on.
+            if line.trim_start().starts_with(['#', ';']) {
+                continue;
+            }
             match (current, pending_key) {
                 (Some(section), Some(key)) if key < sections[section].1.len() => {
                     sections[section].1[key].1.push('\n');
@@ -427,6 +432,23 @@ pass = fake-password-9ZQ4
         .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::ConfigError);
         assert!(err.context.contains("line 1"), "{}", err.context);
+    }
+
+    #[test]
+    fn parse_skips_indented_comment_lines() {
+        // Indented comments are comments in configparser, never continuation text.
+        let sections = parse_oscrc(
+            "  # leading note\n[https://api.opensuse.org]\n\t; section note\nuser = fakeuser\n    # trailing note\npass = fake-password-7XQ2\n",
+            &oscrc_path(),
+        )
+        .unwrap();
+        assert_eq!(
+            sections,
+            vec![OscrcSection {
+                apiurl: "https://api.opensuse.org".to_string(),
+                username: Some("fakeuser".to_string()),
+            }]
+        );
     }
 
     #[test]
