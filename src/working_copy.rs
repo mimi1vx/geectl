@@ -2090,9 +2090,9 @@ fn path_segment(name: &str) -> String {
 /// Refuse a project or package name that is not a single path
 /// segment: `.` and `..` would escape the checkout directory
 /// (and a failed checkout's cleanup would delete outside it),
-/// and a separator or NUL is never a name. OBS names allow `.`
-/// (so `..` passes the server's own name check) — this is the
-/// check that stops it.
+/// and a separator or NUL is never a name. OBS names allow `.`,
+/// and a name can arrive here without passing `valid_obs_name` —
+/// this is the check that stops it.
 fn check_name_segment(kind: &str, name: &str) -> Result<(), GeectlError> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
         return Err(GeectlError::new(

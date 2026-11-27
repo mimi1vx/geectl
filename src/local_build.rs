@@ -1055,10 +1055,10 @@ pub fn validate_build_request(req: &BuildRequest) -> Result<(), GeectlError> {
         validate_path_component("alternative project", alt)?;
     }
     // The path components under the cache dir must be single
-    // components: `valid_obs_name` allows `.`, so `..` would
-    // pass it and escape the cache dir (a `build --clean` would
-    // then wipe an arbitrary directory). The package component
-    // is checked in `build` once it is known from the spec.
+    // components: a `..` would escape the cache dir (a
+    // `build --clean` would then wipe an arbitrary directory).
+    // The package component is checked in `build` once it is
+    // known from the spec.
     validate_cache_components(&req.project, &req.repo, &req.arch, &req.flavor)?;
     if req.arch != std::env::consts::ARCH {
         return Err(GeectlError::new(
@@ -5503,10 +5503,11 @@ fn preinstall_image_applies(clean: bool, root: &Path) -> bool {
 }
 
 /// One path component under the cache dir: a single name, never a
-/// traversal. `valid_obs_name` allows `.`, so `..` (and `/`, `\`,
-/// NUL, empty) needs this separate check — without it a flavor of
-/// `../../x` (or a `..` project/repo) would escape the cache dir,
-/// and a `build --clean` would wipe an arbitrary directory.
+/// traversal. Not every component passes `valid_obs_name` first,
+/// so `..` (and `/`, `\`, NUL, empty) needs this separate check —
+/// without it a flavor of `../../x` (or a `..` project/repo) would
+/// escape the cache dir, and a `build --clean` would wipe an
+/// arbitrary directory.
 /// Control characters are rejected too: an ANSI escape rides on
 /// ESC, so a server-supplied name carrying one must fail here,
 /// never reach the terminal.
@@ -10830,10 +10831,7 @@ exit 0
                 req.alternative_project = Some(alt.to_string());
                 let err = validate_build_request(&req).unwrap_err();
                 assert_eq!(err.kind(), ErrorKind::InvalidInput);
-                assert!(
-                    err.to_string().contains("alternative project"),
-                    "got: {err}"
-                );
+                assert!(err.to_string().contains(&format!("{alt:?}")), "got: {err}");
             }
         }
 
