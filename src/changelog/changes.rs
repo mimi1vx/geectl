@@ -316,7 +316,10 @@ pub fn parse_changes(text: &str) -> ChangesFile {
         let header = parse_header(&header_raw);
         let body_start = header_idx + 1;
         let body_end = seps.get(k + 1).copied().unwrap_or(lines.len());
-        let body: Vec<(usize, String)> = lines[body_start..body_end]
+        // A separator on the last line or right before another one leaves no body.
+        let body: Vec<(usize, String)> = lines
+            .get(body_start..body_end)
+            .unwrap_or_default()
             .iter()
             .enumerate()
             .map(|(off, line)| (body_start + off + 1, line.clone()))
@@ -714,6 +717,25 @@ mod tests {
         assert_eq!(file.entries[1].separator_line, 6);
         assert_eq!(file.entries[0].bullets().len(), 1);
         assert_eq!(file.entries[0].groups().len(), 1);
+    }
+
+    #[test]
+    fn parse_changes_survives_a_trailing_or_doubled_separator() {
+        let sep = separator_line();
+        let file = parse_changes(&format!("{sep}\n"));
+        assert_eq!(file.entries.len(), 1);
+        assert!(file.entries[0].header.is_none());
+        assert!(file.entries[0].body.is_empty());
+        assert_eq!(file.entries[0].raw(&file.lines), sep);
+
+        let text = format!(
+            "{sep}\n{sep}\nWed May 27 16:31:48 UTC 2026 - Jane <jane@example.com>\n\n- Fix\n"
+        );
+        let file = parse_changes(&text);
+        assert_eq!(file.entries.len(), 2);
+        assert!(file.entries[0].body.is_empty());
+        assert_eq!(file.entries[0].raw(&file.lines), sep);
+        assert!(file.entries[1].header.is_some());
     }
 
     #[test]
